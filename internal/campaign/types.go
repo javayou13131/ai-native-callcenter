@@ -50,6 +50,9 @@ const (
 	PauseManual          PauseReason = "MANUAL"
 	PauseTrunkFailure    PauseReason = "TRUNK_FAILURE"
 	PauseProviderFailure PauseReason = "PROVIDER_FAILURE"
+	// PauseOutboundNotConfigured: the dialer found the deployment with no
+	// outbound endpoint (AICC_OUTBOUND_ENDPOINT) while the campaign ran.
+	PauseOutboundNotConfigured PauseReason = "OUTBOUND_NOT_CONFIGURED"
 )
 
 // ContactStatus is where a contact is in a campaign.

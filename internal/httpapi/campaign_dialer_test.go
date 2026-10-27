@@ -49,8 +49,8 @@ func TestARunningCampaignShowsWhatTheDialerSaysAboutIt(t *testing.T) {
 	outer, _ := dayrange.Parse("08:00-21:00")
 	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
 		d.Campaigns = campaign.NewService(st.Campaigns(), nil,
-			campaign.Env{OutboundHours: outer, DefaultCountryCode: "86", OutboundEndpoint: testOutboundEndpoint}).
-			WithDialer(progress, nil)
+			campaign.Env{OutboundHours: outer, DefaultCountryCode: "86"}).
+			WithPlacer(canPlace(true)).WithDialer(progress, nil)
 	})
 	admin := f.seedAdmin()
 	didID, _ := campaignDID(t, f.st, "95099", false)

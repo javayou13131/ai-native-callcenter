@@ -52,10 +52,12 @@ type seeded struct {
 	cookie  string
 }
 
-// testOutboundEndpoint is the dial string a fixture's deployment has: a
-// campaign cannot be started without one, and these tests are about what
-// happens after it is.
-const testOutboundEndpoint = "sofia/gateway/pstn_gateway/%s"
+// canPlace is a deployment's answer to campaign.Placer: a campaign cannot be
+// started or resumed on one that cannot dial, and most of these tests are about
+// what happens after it can.
+type canPlace bool
+
+func (c canPlace) CanPlaceAI() bool { return bool(c) }
 
 // newFixture builds a real database, runs the real migrations, and stands up a
 // real server.
@@ -106,8 +108,8 @@ func newFixtureWithConfig(t *testing.T, configure func(*config.Config),
 		Contacts: st.Contacts(),
 		DNC:      st.DNC(),
 		Campaigns: campaign.NewService(st.Campaigns(), nil, campaign.Env{
-			DefaultCountryCode: "86", OutboundEndpoint: testOutboundEndpoint,
-		}),
+			DefaultCountryCode: "86",
+		}).WithPlacer(canPlace(true)),
 		Flows: st.Flows(),
 		Keys:  APIKeys{APIKeyStore: st.APIKeys()},
 		Hub:   events.NewHub(events.NewSequence(dbSeq{st}, "events")),

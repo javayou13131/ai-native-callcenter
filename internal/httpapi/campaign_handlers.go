@@ -553,11 +553,12 @@ func campaignOut(c campaign.Campaign) api.Campaign {
 		cc := c.DefaultCountryCode
 		out.DefaultCountryCode = &cc
 	}
-	fields := c.FlowFields
-	if fields == nil {
-		fields = []string{}
+	// nil is unknown (a page, or a flow that could not be read) and is left
+	// out; a known list, empty included, is an array.
+	if c.FlowFields != nil {
+		fields := c.FlowFields
+		out.FlowFields = &fields
 	}
-	out.FlowFields = &fields
 	return out
 }
 

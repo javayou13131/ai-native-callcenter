@@ -162,11 +162,6 @@ type Env struct {
 	// DefaultCountryCode (AICC_DEFAULT_COUNTRY_CODE) completes national
 	// numbers of campaigns that name no country code of their own.
 	DefaultCountryCode string
-	// OutboundEndpoint is AICC_OUTBOUND_ENDPOINT: the dial string a customer
-	// leg is placed with, empty when the deployment cannot dial out at all.
-	// Start reads it so a campaign that could not place a single call is
-	// refused while somebody is looking, not after hours of failed attempts.
-	OutboundEndpoint string
 }
 
 // ringTimeoutMaxSec is the largest whole number of seconds strictly below the
@@ -194,6 +189,13 @@ type Settings struct {
 	RingTimeoutSec IntRange
 }
 
+// Placer says whether this deployment can place an AI outbound call at all.
+// outbound.Service answers it from the same setting PlaceAI refuses on, so the
+// campaign use cases keep no copy of AICC_OUTBOUND_ENDPOINT.
+type Placer interface {
+	CanPlaceAI() bool
+}
+
 // Service is the campaign use cases.
 type Service struct {
 	repo Repository
@@ -205,6 +207,29 @@ type Service struct {
 	observer Observer
 	// onCreated hears of every campaign stored by Create; optional.
 	onCreated func(id uuid.UUID)
+	// placer is asked by Start and Resume whether a call can be placed; nil
+	// means unknown, which is not a refusal.
+	placer Placer
+}
+
+// WithPlacer sets what Start and Resume ask whether the deployment can dial.
+func (s *Service) WithPlacer(p Placer) *Service {
+	s.placer = p
+	return s
+}
+
+// checkCanDial refuses a transition into RUNNING on a deployment that cannot
+// place a call: left to the dialer, every attempt would be refused inside the
+// application and the campaign paused again on the first one.
+func (s *Service) checkCanDial() error {
+	if s.placer == nil || s.placer.CanPlaceAI() {
+		return nil
+	}
+	return &Error{
+		Kind: ErrOutboundNotConfigured,
+		Message: "this deployment has no outbound endpoint (AICC_OUTBOUND_ENDPOINT), " +
+			"so no call could be placed; see deploy/carrier.md",
+	}
 }
 
 // WithCreatedHook sets what is told that a campaign was created. A create is a
@@ -299,11 +324,21 @@ func (s *Service) attachFlowFields(ctx context.Context, list []Campaign) error {
 	return nil
 }
 
-// present fills everything a response carries beyond the stored row: the
-// dialer's view of a running campaign and the field names its flow reads.
-func (s *Service) present(ctx context.Context, list []Campaign) error {
+// presentOne is how a single campaign leaves the service for a response: the
+// dialer's view of it and, when the flow can be read, the field names it reads.
+// A lookup that fails is logged and leaves FlowFields nil, which the API omits:
+// unknown is not the same as "reads nothing". Pages (List) do not come through
+// here; the SPA refetches them on every campaign event, so they carry no flow
+// lookup.
+func (s *Service) presentOne(ctx context.Context, c Campaign) Campaign {
+	list := []Campaign{c}
 	s.annotate(list)
-	return s.attachFlowFields(ctx, list)
+	if err := s.attachFlowFields(ctx, list); err != nil {
+		slog.Warn("campaign: cannot fill the read-only flowFields of a response",
+			"campaignId", c.ID, "error", err)
+		list[0].FlowFields = nil
+	}
+	return list[0]
 }
 
 // moved presents the campaign a transition returns.
@@ -311,17 +346,13 @@ func (s *Service) present(ctx context.Context, list []Campaign) error {
 // The transition is committed by the time this runs, so a lookup that cannot
 // fill the read-only advice is logged and the response still goes out: told
 // the start failed, a client would retry and be answered a transition error,
-// having no way to learn the campaign is running.
+// having no way to learn the campaign is running. The SPA replaces its cached
+// campaign with this response, which is why it carries flowFields too.
 func (s *Service) moved(ctx context.Context, c Campaign, err error) (Campaign, error) {
 	if err != nil {
 		return c, err
 	}
-	list := []Campaign{c}
-	if err := s.present(ctx, list); err != nil {
-		slog.Warn("campaign: cannot fill the read-only fields of a transition's response",
-			"campaignId", c.ID, "error", err)
-	}
-	return list[0], nil
+	return s.presentOne(ctx, c), nil
 }
 
 // ListAttempts pages a campaign's attempts, newest first.
@@ -428,12 +459,7 @@ func (s *Service) Create(ctx context.Context, in New) (Campaign, error) {
 	if s.onCreated != nil {
 		s.onCreated(stored.ID)
 	}
-	list := []Campaign{stored}
-	if err := s.present(ctx, list); err != nil {
-		slog.Warn("campaign: cannot fill the read-only fields of a create's response",
-			"campaignId", stored.ID, "error", err)
-	}
-	return list[0], nil
+	return s.presentOne(ctx, stored), nil
 }
 
 // Load is how the dialer reads a campaign: the stored row with the dialer's own
@@ -464,8 +490,9 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (Campaign, error) {
 	}
 	list := []Campaign{c}
 	if err := s.attachFlowFields(ctx, list); err != nil {
-		slog.Warn("campaign: cannot fill the read-only fields of a campaign's response",
+		slog.Warn("campaign: cannot fill the read-only flowFields of a response",
 			"campaignId", id, "error", err)
+		list[0].FlowFields = nil
 	}
 	return list[0], nil
 }
@@ -479,10 +506,9 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Campaign, int64, er
 	if err != nil {
 		return nil, total, err
 	}
-	if err := s.present(ctx, items); err != nil {
-		// The page is the resource; the field names are advice on top of it.
-		slog.Warn("campaign: cannot fill the read-only fields of a page of campaigns", "error", err)
-	}
+	// A page carries the dialer's account and no flowFields: the SPA refetches
+	// the list on every campaign event, and the names are for one campaign.
+	s.annotate(items)
 	return items, total, nil
 }
 
@@ -590,12 +616,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, p Patch) (Campaign, 
 	if s.observer != nil {
 		s.observer.Updated(before, after)
 	}
-	list := []Campaign{after}
-	if err := s.present(ctx, list); err != nil {
-		slog.Warn("campaign: cannot fill the read-only fields of an update's response",
-			"campaignId", after.ID, "error", err)
-	}
-	return list[0], nil
+	return s.presentOne(ctx, after), nil
 }
 
 func differs(field string, a, b Campaign) bool {
@@ -647,12 +668,8 @@ func (s *Service) Start(ctx context.Context, id uuid.UUID) (Campaign, error) {
 	if cur.Status != StatusDraft {
 		return Campaign{}, NewTransitionError(cur.Status, "START")
 	}
-	if s.env.OutboundEndpoint == "" {
-		return Campaign{}, &Error{
-			Kind: ErrOutboundNotConfigured,
-			Message: "this deployment has no outbound endpoint (AICC_OUTBOUND_ENDPOINT), " +
-				"so no call could be placed; see deploy/carrier.md",
-		}
+	if err := s.checkCanDial(); err != nil {
+		return Campaign{}, err
 	}
 	if _, err := s.validate(ctx, cur, changes{
 		"didId": true, "timeZone": true, "callingWindow": true, "ringTimeoutSec": true,
@@ -669,8 +686,22 @@ func (s *Service) Pause(ctx context.Context, id uuid.UUID) (Campaign, error) {
 	return s.moved(ctx, c, err)
 }
 
-// Resume moves PAUSED to RUNNING, whatever paused it.
+// Resume moves PAUSED to RUNNING, whatever paused it. A deployment that cannot
+// dial refuses it, the campaign staying PAUSED: reporting RUNNING a campaign the
+// dialer would pause again on its first attempt is a lie of a few seconds. A
+// status that does not allow the transition is answered first, as for Start; the
+// database still decides a race.
 func (s *Service) Resume(ctx context.Context, id uuid.UUID) (Campaign, error) {
+	cur, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Campaign{}, err
+	}
+	if cur.Status != StatusPaused {
+		return Campaign{}, NewTransitionError(cur.Status, "RESUME")
+	}
+	if err := s.checkCanDial(); err != nil {
+		return Campaign{}, err
+	}
 	c, err := s.ctl.Resume(ctx, id)
 	return s.moved(ctx, c, err)
 }

@@ -470,8 +470,8 @@ func TestACampaignThatCannotDialIsPausedOnItsFirstAttempt(t *testing.T) {
 	r.start(c)
 
 	got := r.campaignNow(c)
-	if got.Status != campaign.StatusPaused || got.PauseReason != campaign.PauseTrunkFailure {
-		t.Fatalf("status %s/%s, want PAUSED/TRUNK_FAILURE", got.Status, got.PauseReason)
+	if got.Status != campaign.StatusPaused || got.PauseReason != campaign.PauseOutboundNotConfigured {
+		t.Fatalf("status %s/%s, want PAUSED/OUTBOUND_NOT_CONFIGURED", got.Status, got.PauseReason)
 	}
 	if n := len(r.attempts(c)); n != 0 {
 		t.Errorf("%d attempt rows, want none: a refusal before a channel voids the attempt", n)
@@ -521,8 +521,8 @@ func TestACampaignRunningBeforeARestartIsPausedWhenTheEndpointIsGone(t *testing.
 	r.settle()
 
 	got := r.campaignNow(c)
-	if got.Status != campaign.StatusPaused || got.PauseReason != campaign.PauseTrunkFailure {
-		t.Fatalf("status %s/%s, want PAUSED/TRUNK_FAILURE", got.Status, got.PauseReason)
+	if got.Status != campaign.StatusPaused || got.PauseReason != campaign.PauseOutboundNotConfigured {
+		t.Fatalf("status %s/%s, want PAUSED/OUTBOUND_NOT_CONFIGURED", got.Status, got.PauseReason)
 	}
 	if n := len(r.attempts(c)); n != 0 {
 		t.Errorf("%d attempt rows, want none", n)

@@ -493,8 +493,7 @@ func run() error {
 		OutboundHours:      cfg.OutboundHours,
 		AnswerWindow:       config.OutboundAnswerWindow,
 		DefaultCountryCode: cfg.DefaultCountryCode,
-		OutboundEndpoint:   cfg.OutboundEndpoint,
-	}).WithDialer(campaignProgress, campaignObserver).WithCreatedHook(campaignReporter.Touch)
+	}).WithDialer(campaignProgress, campaignObserver).WithCreatedHook(campaignReporter.Touch).WithPlacer(outboundSvc)
 	campaignService.Store(campaignSvc)
 
 	var spa http.Handler
