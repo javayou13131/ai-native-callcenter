@@ -1458,7 +1458,7 @@ export interface paths {
         put?: never;
         /**
          * Resume a campaign
-         * @description PAUSED to RUNNING, whatever paused it, and the pause reason is cleared. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write.
+         * @description PAUSED to RUNNING, whatever paused it, and the pause reason is cleared. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write. A deployment that cannot place an outbound call at all (`AICC_OUTBOUND_ENDPOINT` empty) answers 409 OUTBOUND_NOT_CONFIGURED and the campaign stays PAUSED, rather than reporting RUNNING a campaign the dialer would pause again on its first attempt. `deploy/carrier.md` says how to set it.
          */
         post: operations["resumeCampaign"];
         delete?: never;
@@ -3363,10 +3363,10 @@ export interface components {
          */
         CampaignStatus: "DRAFT" | "RUNNING" | "PAUSED" | "COMPLETED" | "CANCELLED";
         /**
-         * @description Why a campaign is PAUSED: an operator (MANUAL) or a breaker (TRUNK_FAILURE, PROVIDER_FAILURE). Resuming is an operator's decision in every case.
+         * @description Why a campaign is PAUSED. MANUAL: an operator paused it. TRUNK_FAILURE: the trunk breaker tripped, several attempts in a row ended in a transient or originate failure. PROVIDER_FAILURE: the voice-provider breaker tripped, several answered calls in a row could not start a bot session. OUTBOUND_NOT_CONFIGURED: the dialer found AICC_OUTBOUND_ENDPOINT empty while the campaign was running; set it, then resume. Resuming is an operator's decision in every case.
          * @enum {string}
          */
-        CampaignPauseReason: "MANUAL" | "TRUNK_FAILURE" | "PROVIDER_FAILURE";
+        CampaignPauseReason: "MANUAL" | "TRUNK_FAILURE" | "PROVIDER_FAILURE" | "OUTBOUND_NOT_CONFIGURED";
         /**
          * @description ACTIVE is still to be dialled. DONE was answered, whatever came of it. EXHAUSTED used up maxAttempts or maxSystemRetries. INVALID_NUMBER is a number the carrier says does not exist. DNC is on the do-not-call list.
          * @enum {string}
@@ -3501,7 +3501,7 @@ export interface components {
             nextDialAt?: string;
             /** @description Read-only. Calls this campaign has ringing or talking right now. Absent unless RUNNING. */
             inFlight?: number;
-            /** @description Read-only. The business-data names the campaign's flow reads (userData.<name>): the vocabulary a contact's imported columns may map to. Sorted, without duplicates; empty when the DID has no published flow. */
+            /** @description Read-only. The business-data names the campaign's flow reads (userData.<name>): the vocabulary a contact's imported columns may map to. Sorted, without duplicates. Present on a single campaign (getCampaign and the responses of createCampaign, updateCampaign and every transition); absent from listCampaigns pages, and absent when the flow could not be read. An empty array means the DID has no published flow or the flow reads no userData. */
             flowFields?: string[];
         };
         /** @description A campaign to create. It starts as a DRAFT. */
@@ -3756,7 +3756,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED. Holding, retrieving and transferring an INTERNAL call answer OPERATION_NOT_ALLOWED_FOR_CALL_TYPE; transferring a caller whose previous transfer the switch has not yet confirmed answers TRANSFER_IN_PROGRESS. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER; clearing allowOutbound on a DID such a campaign dials from answers CAMPAIGN_DID_NOT_OUTBOUND. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED, OUTBOUND_NOT_CONFIGURED (the deployment has no AICC_OUTBOUND_ENDPOINT: createCall for AI_OUTBOUND, startCampaign and resumeCampaign). Holding, retrieving and transferring an INTERNAL call answer OPERATION_NOT_ALLOWED_FOR_CALL_TYPE; transferring a caller whose previous transfer the switch has not yet confirmed answers TRANSFER_IN_PROGRESS. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER; clearing allowOutbound on a DID such a campaign dials from answers CAMPAIGN_DID_NOT_OUTBOUND. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
