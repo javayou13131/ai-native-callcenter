@@ -917,12 +917,14 @@
     "pauseReasons": {
       "MANUAL": "已由人工暂停",
       "TRUNK_FAILURE": "已自动暂停：中继线路故障",
-      "PROVIDER_FAILURE": "已自动暂停：语音服务商故障"
+      "PROVIDER_FAILURE": "已自动暂停：语音服务商故障",
+      "OUTBOUND_NOT_CONFIGURED": "已自动暂停：部署未配置外呼出口"
     },
     "pauseExplain": {
       "MANUAL": "不会再拨出新电话，进行中的通话正常结束。",
-      "TRUNK_FAILURE": "这个活动发不出呼叫：要么连续多个呼叫失败，要么部署根本没有配置外呼出口（AICC_OUTBOUND_ENDPOINT）。系统不会自动恢复，请检查中继线路（deploy/carrier.md）后手动恢复。",
-      "PROVIDER_FAILURE": "连续多个已接通的呼叫无法启动机器人会话。系统不会自动恢复，请检查语音服务商后手动恢复。"
+      "TRUNK_FAILURE": "连续多个呼叫无法到达运营商。系统不会自动恢复，请检查中继线路后手动恢复。",
+      "PROVIDER_FAILURE": "连续多个已接通的呼叫无法启动机器人会话。系统不会自动恢复，请检查语音服务商后手动恢复。",
+      "OUTBOUND_NOT_CONFIGURED": "拨号器发现 AICC_OUTBOUND_ENDPOINT 为空，无法发起任何呼叫。请把它设为运营商网关使用的拨号串（见 deploy/carrier.md）并重建应用，然后再恢复该活动；未设置之前无法恢复。"
     },
     "counts": {
       "total": "联系人",
@@ -1077,7 +1079,7 @@
       "sheetOf": "要导入的工作表",
       "mapping": "列",
       "mappingHint": "选择号码列；如果文件有时区列也请指定。表头与活动流程读取的字段同名的列会自动选中；其余列默认忽略，也可以指定为流程的某个字段。流程不读取的字段会导致该行失败。",
-      "noFlowFields": "这个活动的流程不读取任何业务字段，只能映射号码和时区。",
+      "noFlowFields": "这个活动的流程不读取任何业务字段，或其号码尚未发布流程，只能映射号码和时区。",
       "unnamed": "第 {{n}} 列",
       "roleOf": "列 {{name}} 的用途",
       "slotNameOf": "列 {{name}} 的字段名",

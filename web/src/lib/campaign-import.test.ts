@@ -45,6 +45,35 @@ describe('guessing what each column is', () => {
     ])
   })
 
+  it('gives a field to the first of two headers that name it, and ignores the later ones', () => {
+    // `Name` and `name` are one field however the case differs; offering it to
+    // both would open the dialog already refused as DUPLICATE_SLOT.
+    const roles = guessRoles(['phone', 'Name', 'name', 'NAME'], ['name'])
+    expect(roles).toEqual([
+      { kind: 'number' },
+      { kind: 'slot', name: 'name' },
+      { kind: 'ignore' },
+      { kind: 'ignore' },
+    ])
+    expect(mappingProblem(roles)).toBeUndefined()
+  })
+
+  it('falls back to the first column that is not a flow field when no header reads like a number', () => {
+    // The first column is not always the number: here it is a field the flow reads.
+    expect(guessRoles(['Name', 'plan', 'contact_no'], ['name', 'plan'])).toEqual([
+      { kind: 'slot', name: 'name' },
+      { kind: 'slot', name: 'plan' },
+      { kind: 'number' },
+    ])
+    // When every column names a field, column 0 is still the number.
+    expect(guessRoles(['name', 'plan'], ['name', 'plan'])).toEqual([
+      { kind: 'number' },
+      { kind: 'slot', name: 'plan' },
+    ])
+    // A header that reads like a number still wins over the fallback.
+    expect(guessRoles(['a', 'phone'], ['x'])[1]).toEqual({ kind: 'number' })
+  })
+
   it('prefers the number and the zone over a field of the same name', () => {
     // "phone" and "tz" are not fields the flow can be given; the roles that
     // decide how a row is dialled win.

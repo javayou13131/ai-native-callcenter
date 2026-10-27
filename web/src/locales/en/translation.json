@@ -920,12 +920,14 @@
     "pauseReasons": {
       "MANUAL": "Paused by a person",
       "TRUNK_FAILURE": "Paused automatically: the trunk is failing",
-      "PROVIDER_FAILURE": "Paused automatically: the voice provider is failing"
+      "PROVIDER_FAILURE": "Paused automatically: the voice provider is failing",
+      "OUTBOUND_NOT_CONFIGURED": "Paused automatically: this deployment has no outbound endpoint"
     },
     "pauseExplain": {
       "MANUAL": "No new calls are placed. Calls in progress finish normally.",
-      "TRUNK_FAILURE": "This campaign could not place calls: either several failed in a row, or the deployment has no outbound endpoint at all (AICC_OUTBOUND_ENDPOINT). Nothing will resume it by itself: check the trunk (deploy/carrier.md), then resume it.",
-      "PROVIDER_FAILURE": "Too many answered calls failed to start a bot session in a row. Nothing will resume this campaign by itself: check the voice provider, then resume it."
+      "TRUNK_FAILURE": "Too many calls failed to reach the carrier in a row. Nothing will resume this campaign by itself: check the trunk, then resume it.",
+      "PROVIDER_FAILURE": "Too many answered calls failed to start a bot session in a row. Nothing will resume this campaign by itself: check the voice provider, then resume it.",
+      "OUTBOUND_NOT_CONFIGURED": "The dialer found AICC_OUTBOUND_ENDPOINT empty, so no call could be placed. Set it to the dial string your carrier gateway takes (deploy/carrier.md) and recreate the app, then resume this campaign. Resuming is refused until it is set."
     },
     "counts": {
       "total": "Contacts",
@@ -1081,7 +1083,7 @@
       "sheetOf": "Sheet to import",
       "mapping": "Columns",
       "mappingHint": "Pick the number column and, if the file has one, a time zone column. A column whose header names a field the campaign's flow reads is chosen for it already; every other column is ignored until you choose one of the flow's fields. A name the flow does not read makes its row fail.",
-      "noFlowFields": "The flow behind this campaign reads no business-data fields, so only the number and the time zone can be mapped.",
+      "noFlowFields": "The flow behind this campaign reads no business-data fields, or its number has no published flow, so only the number and the time zone can be mapped.",
       "unnamed": "Column {{n}}",
       "roleOf": "What column {{name}} is",
       "slotNameOf": "Field name for column {{name}}",

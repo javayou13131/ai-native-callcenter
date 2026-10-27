@@ -413,10 +413,10 @@ describe('the contact import', () => {
     return bodies
   }
 
-  // A flow that reads no business data by default, which is the free-name path
+  // Flow fields unknown by default, which is the free-name path
   // these tests were written against; the ones about the flow's names pass
   // them in.
-  function open(onImported = vi.fn(), flowFields: string[] = []) {
+  function open(onImported = vi.fn(), flowFields?: string[]) {
     const view = renderWithProviders(
       <CampaignImportDialog
         campaignId={CAMPAIGN_ID}
@@ -470,6 +470,41 @@ describe('the contact import', () => {
     ])
     expect(onImported).toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Download rejected rows' })).toBeInTheDocument()
+  })
+
+  it('offers the free-typed field only when the flow cannot be read, and none when it reads nothing', async () => {
+    stubImport()
+    const file = csvFile('Phone,notes\n13800138000,keep\n')
+
+    // Unknown (flowFields absent): the name is typed, as before the server offered any.
+    const unknown = open(vi.fn(), undefined)
+    await unknown.user.upload(screen.getByLabelText('CSV or Excel file'), file)
+    const unknownOptions = within(await screen.findByLabelText('What column notes is'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(unknownOptions).toEqual(['Number', 'Time zone', 'Flow field', 'Ignore'])
+    expect(screen.queryByText(/reads no business-data fields/)).not.toBeInTheDocument()
+    unknown.unmount()
+
+    // Known and empty: no slot option at all (any name would be SLOT_UNKNOWN on
+    // every row), and the dialog says why.
+    const empty = open(vi.fn(), [])
+    await empty.user.upload(screen.getByLabelText('CSV or Excel file'), file)
+    const emptyOptions = within(await screen.findByLabelText('What column notes is'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(emptyOptions).toEqual(['Number', 'Time zone', 'Ignore'])
+    expect(screen.getByText(/reads no business-data fields, or its number has no published flow/)).toBeInTheDocument()
+    empty.unmount()
+
+    // Known and non-empty: the names only.
+    const named = open(vi.fn(), ['plan'])
+    await named.user.upload(screen.getByLabelText('CSV or Excel file'), file)
+    const namedOptions = within(await screen.findByLabelText('What column notes is'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(namedOptions).toEqual(['Number', 'Time zone', 'plan', 'Ignore'])
+    expect(screen.queryByText(/reads no business-data fields/)).not.toBeInTheDocument()
   })
 
   it("offers the flow's field names and preselects a column whose header names one", async () => {

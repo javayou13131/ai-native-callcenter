@@ -28,19 +28,30 @@ const TIME_ZONE_HEADERS = /^(time.?zone|tz|timezone|时区)$/i
  *
  * `fieldNames` is the campaign's `flowFields`: the only names the flow will
  * accept, so a match has to be one of them — compared case-insensitively,
- * because a spreadsheet header is typed by hand.
+ * because a spreadsheet header is typed by hand. Two columns can name the same
+ * field (`Name` and `name`); the first keeps it and the later ones stay ignored,
+ * since one field offered twice is a mapping the dialog refuses
+ * (DUPLICATE_SLOT) before the operator has touched anything.
  */
 export function guessRoles(header: string[], fieldNames: readonly string[] = []): ColumnRole[] {
   const numberAt = header.findIndex((h) => NUMBER_HEADERS.test(h.trim()))
   const zoneAt = header.findIndex((h) => TIME_ZONE_HEADERS.test(h.trim()))
-  // With no header that reads like a number, the first column is the best bet.
-  const chosenNumber = numberAt >= 0 ? numberAt : 0
   const fieldOf = new Map(fieldNames.map((name) => [name.toLowerCase(), name]))
+  const namesField = (h: string) => fieldOf.has(h.trim().toLowerCase())
+  // With no header that reads like a number, the best bet is the first column
+  // that is not already a field the flow reads (the first column when they all
+  // are): a file headed `name,plan,phone_no` has its number in the third.
+  const firstOther = header.findIndex((h) => !namesField(h))
+  const chosenNumber = numberAt >= 0 ? numberAt : Math.max(firstOther, 0)
+  const taken = new Set<string>()
   return header.map((h, i): ColumnRole => {
     if (i === chosenNumber) return { kind: 'number' }
     if (i === zoneAt) return { kind: 'timeZone' }
     const field = fieldOf.get(h.trim().toLowerCase())
-    if (field !== undefined) return { kind: 'slot', name: field }
+    if (field !== undefined && !taken.has(field)) {
+      taken.add(field)
+      return { kind: 'slot', name: field }
+    }
     // A column the flow does not read makes the server refuse the whole row,
     // so it stays ignored until the operator opts it in.
     return { kind: 'ignore' }

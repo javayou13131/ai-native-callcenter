@@ -194,7 +194,7 @@ function CampaignDetail() {
 
       <CampaignImportDialog
         campaignId={data.id}
-        flowFields={data.flowFields ?? []}
+        flowFields={data.flowFields}
         open={isImporting}
         onOpenChange={setIsImporting}
         onImported={() => refreshContacts(data.id)}
