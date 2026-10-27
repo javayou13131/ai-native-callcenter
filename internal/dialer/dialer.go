@@ -242,12 +242,6 @@ type Dialer struct {
 	// limits is the DIDs' outbound line limits, read once per pass.
 	limits   map[string]int
 	halted   map[uuid.UUID]bool      // paused by a breaker this pass, not yet re-read
-	// stopped holds the campaigns that admit nothing more for the rest of the
-	// current pass, whether or not the pause that was meant to stop them
-	// landed. Unlike halted, which only began() clears, it is emptied at the
-	// start of every pass: a campaign whose pause failed is still RUNNING, so
-	// the next pass must be free to dial it, or to try the pause again.
-	stopped map[uuid.UUID]bool
 	since    map[uuid.UUID]time.Time // breaker run starts
 	rearm    map[uuid.UUID]bool
 	warnedCC map[uuid.UUID]bool // campaigns already warned about a national dial fallback
@@ -255,6 +249,13 @@ type Dialer struct {
 	schedule map[string]campaign.Schedule
 	timer    Timer
 	replies  []chan struct{}
+
+	// stopped holds the campaigns that admit nothing more for the rest of the
+	// current pass, whether or not the pause that was meant to stop them
+	// landed. Unlike halted, which only began() clears, it is emptied at the
+	// start of every pass: a campaign whose pause failed is still RUNNING, so
+	// the next pass must be free to dial it, or to try the pause again.
+	stopped map[uuid.UUID]bool
 }
 
 // flight is a call in flight: an attempt whose outcome is not written yet.

@@ -47,6 +47,14 @@ func (capturedSwitch) IsUp() bool                   { return true }
 type fakeMigrations struct {
 	state store.MigrationState
 	err   error
+	// outsideUS is how many do-not-call numbers lie outside +1; outsideErr is
+	// what reading them answers.
+	outsideUS  int64
+	outsideErr error
+}
+
+func (f fakeMigrations) DNCCountOutsideCountryCode(context.Context, string) (int64, error) {
+	return f.outsideUS, f.outsideErr
 }
 
 func (f fakeMigrations) MigrationStatus(context.Context) (store.MigrationState, error) {
@@ -327,12 +335,20 @@ type fakeStatus struct {
 	gwErr    error
 	// trunks is the switch's gateway table, which carries both the names that
 	// exist and whether each would place a call now.
-	trunks []telephony.Trunk
+	trunks    []telephony.Trunk
+	trunksErr error
+	// asked, when set, collects the names GatewayUp is asked about.
+	asked *[]string
 }
 
 func (f fakeStatus) Profiles() ([]telephony.SwitchProfile, error) { return f.profiles, nil }
-func (f fakeStatus) GatewayUp(string) (bool, error)               { return f.gateway, f.gwErr }
-func (f fakeStatus) Trunks() ([]telephony.Trunk, error)           { return f.trunks, nil }
+func (f fakeStatus) GatewayUp(name string) (bool, error) {
+	if f.asked != nil {
+		*f.asked = append(*f.asked, name)
+	}
+	return f.gateway, f.gwErr
+}
+func (f fakeStatus) Trunks() ([]telephony.Trunk, error) { return f.trunks, f.trunksErr }
 
 // healthyTrunks is a switch holding the bot gateway (which never registers)
 // and one carrier gateway that does.
@@ -650,6 +666,128 @@ func TestACarrierGatewayStuckRegisteringWarnsEvenIfItAnswersPings(t *testing.T) 
 	}
 }
 
+// The switch prints a gateway as profile::name, and the endpoint may be written
+// the same way. That is a gateway the switch has, not a typo.
+func TestAnEndpointQualifiedWithItsProfilePassesAndNamesTheProfileOnTheSwitch(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/external::carrier_b/%s"
+	var asked []string
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true, trunks: healthyTrunks(), asked: &asked}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStatePass)
+	if len(asked) == 0 || asked[len(asked)-1] != "external::carrier_b" {
+		t.Errorf("the ping status was asked about %v, want external::carrier_b", asked)
+	}
+
+	// The profile counts: the same name on another profile is not this gateway.
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/internal::carrier_b/%s"
+	got = h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+}
+
+// Doctor cannot read the trunk table: that is a warning naming the error, not a
+// failure and not a pass.
+func TestAnUnreadableTrunkTableIsAWarning(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true, trunksErr: errors.New("sofia status timed out")}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	if !strings.Contains(got[DoctorCheckOutboundGateway].Message, "sofia status timed out") {
+		t.Errorf("the warning does not carry the error: %q", got[DoctorCheckOutboundGateway].Message)
+	}
+}
+
+// A gateway that never registers (NOREG) is dialable only while it answers the
+// switch's OPTIONS pings: once the carrier stops, sofia refuses every originate
+// through it, though the trunk table still says NOREG. Passing on the table
+// alone would call that a healthy trunk (#293 review).
+func TestANoregGatewayWhosePingIsDownWarns(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{
+			profiles: externalProfiles(),
+			gateway:  false,
+			trunks: []telephony.Trunk{
+				{Name: "carrier_b", Profile: "external", State: "NOREG", IsUp: true},
+			},
+		}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	msg := got[DoctorCheckOutboundGateway].Message
+	if !strings.Contains(msg, "carrier_b") || !strings.Contains(msg, "NOREG") || !strings.Contains(msg, "DOWN") {
+		t.Errorf("the warning does not name the gateway, its state and the ping: %q", msg)
+	}
+	if n := countFailed([]doctorResult{got[DoctorCheckOutboundGateway]}); n != 0 {
+		t.Errorf("countFailed = %d, want 0", n)
+	}
+}
+
+// An error reading the ping status is a warning too.
+func TestAnUnreadablePingStatusIsAWarning(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), trunks: healthyTrunks(), gwErr: errors.New("reply lost")}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	if !strings.Contains(got[DoctorCheckOutboundGateway].Message, "reply lost") {
+		t.Errorf("the warning does not carry the error: %q", got[DoctorCheckOutboundGateway].Message)
+	}
+}
+
+// The upgrade hazard of the built-in country code: a deployment that never set
+// AICC_DEFAULT_COUNTRY_CODE now completes national numbers to +1, and a
+// do-not-call list in another country stops matching them. A WARN, never a
+// failure; silent when the operator chose the code or the list is all +1.
+func TestAnUnsetCountryCodeWithForeignDoNotCallNumbersWarnsButDoesNotFail(t *testing.T) {
+	ok := store.MigrationState{DBVersion: 33, LatestVersion: 33}
+	cases := []struct {
+		name  string
+		isSet bool
+		db    fakeMigrations
+		want  DoctorState
+	}{
+		{"unset, numbers outside +1", false, fakeMigrations{state: ok, outsideUS: 3}, DoctorStateWarn},
+		{"set, numbers outside +1", true, fakeMigrations{state: ok, outsideUS: 3}, DoctorStatePass},
+		{"unset, every number in +1", false, fakeMigrations{state: ok}, DoctorStatePass},
+		{"unset, list unreadable", false, fakeMigrations{state: ok, outsideErr: errors.New("denied")}, DoctorStateSkip},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.deps.cfg.DefaultCountryCode = "1"
+			h.deps.cfg.IsDefaultCountryCodeSet = c.isSet
+			h.deps.openStore = func(context.Context) (migrationReader, func(), error) {
+				return c.db, func() {}, nil
+			}
+			got := h.run()
+			wantState(t, got, DoctorCheckDNCCountryCode, c.want)
+			if c.want == DoctorStateWarn {
+				r := got[DoctorCheckDNCCountryCode]
+				for _, want := range []string{"+1", "take_message", "AICC_DEFAULT_COUNTRY_CODE"} {
+					if !strings.Contains(r.Message+r.Fix, want) {
+						t.Errorf("the warning does not mention %q: %+v", want, r)
+					}
+				}
+				if r.Code != "DNC_COUNTRY_CODE_UNSET" {
+					t.Errorf("code = %q, want DNC_COUNTRY_CODE_UNSET", r.Code)
+				}
+				if n := countFailed([]doctorResult{r}); n != 0 {
+					t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
+				}
+			}
+		})
+	}
+}
+
 // A gateway that never registers by design (NOREG) is a trunk as it stands:
 // calling it down would report a fault on every healthy deployment.
 func TestAGatewayThatNeverRegistersPasses(t *testing.T) {
@@ -672,19 +810,24 @@ func TestTheGatewayNameIsReadOutOfTheDialString(t *testing.T) {
 	cases := []struct {
 		endpoint string
 		name     string
+		profile  string
 		ok       bool
 	}{
-		{"sofia/gateway/pstn_gateway/%s", "pstn_gateway", true},
-		{"sofia/gateway/pstn_gateway/+1%s", "pstn_gateway", true},
-		{"sofia/gateway//%s", "", false},
-		{"sofia/gateway/pstn_gateway", "", false},
-		{"sofia/external/sip:2125550101@10.0.0.9", "", false},
-		{"", "", false},
+		{"sofia/gateway/pstn_gateway/%s", "pstn_gateway", "", true},
+		{"sofia/gateway/pstn_gateway/+1%s", "pstn_gateway", "", true},
+		{"sofia/gateway/external::pstn_gateway/%s", "pstn_gateway", "external", true},
+		{"sofia/gateway/::pstn_gateway/%s", "", "", false},
+		{"sofia/gateway/external::/%s", "", "", false},
+		{"sofia/gateway//%s", "", "", false},
+		{"sofia/gateway/pstn_gateway", "", "", false},
+		{"sofia/external/sip:2125550101@10.0.0.9", "", "", false},
+		{"", "", "", false},
 	}
 	for _, c := range cases {
-		name, ok := outboundGatewayOf(c.endpoint)
-		if name != c.name || ok != c.ok {
-			t.Errorf("outboundGatewayOf(%q) = %q, %v; want %q, %v", c.endpoint, name, ok, c.name, c.ok)
+		name, profile, ok := outboundGatewayOf(c.endpoint)
+		if name != c.name || profile != c.profile || ok != c.ok {
+			t.Errorf("outboundGatewayOf(%q) = %q, %q, %v; want %q, %q, %v",
+				c.endpoint, name, profile, ok, c.name, c.profile, c.ok)
 		}
 	}
 }
