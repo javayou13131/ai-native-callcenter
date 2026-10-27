@@ -38,8 +38,9 @@ AICC_OUTBOUND_ENDPOINT=sofia/gateway/pstn_gateway/%s
 - The gateway may be written with the profile that holds it, the way the switch
   prints it: `sofia/gateway/external::pstn_gateway/%s` is as good as
   `sofia/gateway/pstn_gateway/%s`.
-- `%s` is the number in the form `AICC_OUTBOUND_DIAL_FORM` names (E.164 with a
-  `+` by default), not always E.164.
+- A campaign fills `%s` with the number in the form `AICC_OUTBOUND_DIAL_FORM`
+  names (E.164 with a `+` by default); a single `POST /calls` uses the number as
+  sent.
 - Empty is allowed: the deployment simply takes calls in and places none.
   A campaign then refuses to start (`409 OUTBOUND_NOT_CONFIGURED`) instead of
   dialling every contact into nothing. One that is already running — the
