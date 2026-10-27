@@ -170,7 +170,7 @@ final.
 | `name` | |
 | `did_id` | the outbound DID; it names the flow and the caller id. Must have a flow. |
 | `status` | `DRAFT \| RUNNING \| PAUSED \| COMPLETED \| CANCELLED` |
-| `pause_reason` | `MANUAL \| TRUNK_FAILURE \| PROVIDER_FAILURE`; NULL unless `PAUSED` |
+| `pause_reason` | `MANUAL \| TRUNK_FAILURE \| PROVIDER_FAILURE \| OUTBOUND_NOT_CONFIGURED`; NULL unless `PAUSED` |
 | `time_zone` | IANA name; the default for contacts that carry none (the window is evaluated per contact, §8.1) |
 | `calling_window` | jsonb: days of week and one or more `[start, end)` wall-clock ranges; must lie inside the outer calling hours (§8.1) |
 | `default_country_code` | used to normalise national numbers on import (§9) |
@@ -242,8 +242,9 @@ DRAFT ──start──▶ RUNNING ──pause──▶ PAUSED ──resume─�
                     └── no ACTIVE contact left and nothing in flight ──▶ COMPLETED
 ```
 
-- `PAUSED` is entered by an operator (`MANUAL`) or by a breaker (`TRUNK_FAILURE`,
-  `PROVIDER_FAILURE`, §7.4). Pausing stops new attempts; attempts in flight finish normally.
+- `PAUSED` is entered by an operator (`MANUAL`), by a breaker (`TRUNK_FAILURE`,
+  `PROVIDER_FAILURE`) or by the dialer finding the deployment unable to dial
+  (`OUTBOUND_NOT_CONFIGURED`), all in §7.4. Pausing stops new attempts; attempts in flight finish normally.
 - **A closed calling window is not `PAUSED`**; the campaign stays `RUNNING`. Three reasons:
   - Windows are evaluated in each contact's time zone (§8.1), so at one moment some contacts are
     inside their window and others are not. "Window closed" is a fact about contacts, which a
@@ -761,10 +762,18 @@ outside the window, and move to Tuesday 09:00.
 - **No outbound endpoint (decided 2026-10-21, #293 review).** A deployment with an empty
   `AICC_OUTBOUND_ENDPOINT` cannot place any call, so the first attempt the placer refuses
   (`ErrNoOutboundEndpoint`) is voided — no attempt row, no retry budget, the contact due again as
-  it was — and the campaign is paused at once as `PAUSED / TRUNK_FAILURE`. One attempt is enough
-  evidence: waiting for `N` of them would spend the list's system retries on a setting, and the
-  `409 OUTBOUND_NOT_CONFIGURED` a start answers does not cover a resume, or a campaign the dialer
-  picked up after a restart.
+  it was — and the campaign is paused at once as `PAUSED / OUTBOUND_NOT_CONFIGURED`, a reason of
+  its own because the fix is a setting, not the carrier `TRUNK_FAILURE` sends an operator to. One
+  attempt is enough evidence: waiting for `N` of them would spend the list's system retries on a
+  setting. Whatever the pause does (it can fail on a database error), the campaign admits nothing
+  more in that pass, and the next pass tries the pause again: the voided contact is due again, and
+  a pass that kept admitting would refuse it for ever.
+- **Start and Resume refuse early.** Both ask `outbound.Service.CanPlaceAI` (the one answer; the
+  campaign service keeps no copy of the setting) and answer `409 OUTBOUND_NOT_CONFIGURED`, the
+  campaign staying `DRAFT` or `PAUSED`, after the status check (`CAMPAIGN_INVALID_TRANSITION`
+  first). Without that a resume would report `RUNNING` for the few seconds until the dialer
+  paused the campaign again. The dialer's rule above still covers a campaign that was `RUNNING`
+  when the application came back without an endpoint.
 - Both are resumed by an operator.
 
 ---

@@ -35,12 +35,18 @@ AICC_OUTBOUND_ENDPOINT=sofia/gateway/pstn_gateway/%s
   `effective_caller_id_number` does not apply on this path, because an AI
   outbound call is originated straight to the endpoint rather than through a
   dialplan route.
+- The gateway may be written with the profile that holds it, the way the switch
+  prints it: `sofia/gateway/external::pstn_gateway/%s` is as good as
+  `sofia/gateway/pstn_gateway/%s`.
+- `%s` is the number in the form `AICC_OUTBOUND_DIAL_FORM` names (E.164 with a
+  `+` by default), not always E.164.
 - Empty is allowed: the deployment simply takes calls in and places none.
   A campaign then refuses to start (`409 OUTBOUND_NOT_CONFIGURED`) instead of
-  dialling every contact into nothing, and one that is already running — after
-  a resume, or after the application restarted — is paused on its first
-  attempt with `TRUNK_FAILURE`, that attempt voided rather than retried.
-  Fixing the endpoint and resuming is the whole recovery.
+  dialling every contact into nothing. One that is already running — the
+  application restarted without the endpoint — is paused on its first attempt
+  with the reason `OUTBOUND_NOT_CONFIGURED`, that attempt voided rather than
+  retried, and resuming it is refused with the same code until the endpoint is
+  set. Setting the endpoint and then resuming is the whole recovery.
 - Recreate the application after changing it, and the switch after changing the
   gateway file: `docker compose up -d aicc` and
-  `docker compose exec freeswitch fs_cli -x "sofia profile external rescan"`.
+  `docker compose exec freeswitch fs_cli -P 18021 -p <ESL_PASSWORD> -x "sofia profile external rescan"`.

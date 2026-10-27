@@ -155,6 +155,14 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `external_ip_advertised` | `EXTERNAL_IP_STALE` |
 | `provider_key` | `PROVIDER_KEY_MISSING` |
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
+| `dnc_country_code` | `DNC_COUNTRY_CODE_UNSET` (a `WARN`, not a failure) |
+
+`dnc_country_code` warns when `AICC_DEFAULT_COUNTRY_CODE` is not set (the
+application's default, `1`, applies) and the do-not-call list holds a number
+outside `+1`: national numbers are then completed to `+1` for the do-not-call
+check, contact import and the bot's take_message callback numbers, and a
+national number from another country stops matching its list entry. Set
+`AICC_DEFAULT_COUNTRY_CODE` to your country's code.
 
 Two of those are the outbound path a campaign needs: `outbound_endpoint` warns
 when `AICC_OUTBOUND_ENDPOINT` is empty (the deployment can take calls in but
@@ -163,7 +171,9 @@ gateway the switch does not have — a typo, or a gateway file that never loaded
 — and lists the gateways it does have. It also warns when the gateway is there
 but the switch would not place a call through it, naming the state it is in
 (`FAIL_WAIT`, `UNREGED`, `DOWN`): a carrier gateway that registers can answer
-pings and still fail every call.
+pings and still fail every call, and one that never registers (`NOREG`) is
+dialable only while it answers the switch's OPTIONS pings, so a `NOREG` gateway
+whose ping status is `DOWN` warns too.
 
 ### Next: an agent's browser phone
 
@@ -453,12 +463,15 @@ better than a campaign whose every attempt fails and is retried for hours.
 [carrier.md](carrier.md) sets up both, and `aicc doctor` warns about each while
 it is missing (see [aicc doctor](#aicc-doctor)).
 
-The stack's country code is `86` — the same value it has always set, so
-upgrading cannot change how a deployment's national numbers match the
-do-not-call list — and a national number in an imported list is completed to
-`+86` before it is dialled. A deployment elsewhere sets its own in `.env`
-(`AICC_DEFAULT_COUNTRY_CODE=1`, say); the application's own default, for a
-container that is given none, is `1`. A number written with its code
+The stack's country code is `86` while `.env` does not mention
+`AICC_DEFAULT_COUNTRY_CODE` — the same value it has always set, so upgrading
+cannot change how a deployment's national numbers match the do-not-call list —
+and a national number in an imported list is completed to `+86` before it is
+dialled. A deployment elsewhere sets its own in `.env`
+(`AICC_DEFAULT_COUNTRY_CODE=1`, say). A blank `AICC_DEFAULT_COUNTRY_CODE=` line
+is not the same as no line: the stack passes it through as unset, and the
+application's own default, `1`, applies, not `86` (`aicc doctor` warns about
+that when the do-not-call list holds numbers outside `+1`). A number written with its code
 (`+8613800000001`) is taken as written on either, and a campaign may set
 `defaultCountryCode` for its own contacts.
 

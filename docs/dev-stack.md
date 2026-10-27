@@ -73,8 +73,9 @@ number (13800138000) is completed to `+86…` for the do-not-call check and for 
 campaign import. The binary's default is `1`, which is what a phone number
 without a country code means when nobody says otherwise; without that line a
 national number would be completed to `+1…` and checked against the list as
-such. There is no unset value to warn about: `AICC_DEFAULT_COUNTRY_CODE=` reads
-as unset and the default applies.
+such. `AICC_DEFAULT_COUNTRY_CODE=` reads as unset and the default applies;
+`aicc doctor` warns (`dnc_country_code`) when the code is unset and the
+do-not-call list holds numbers outside `+1`.
 
 Logs go to stderr **and** to `logs/aicc-<starttime>.log`. Read the file when
 analysing a run; it is the only copy that survives the terminal.
